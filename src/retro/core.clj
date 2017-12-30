@@ -1,12 +1,28 @@
 (ns retro.core
   (:use [clojure.string])
   (require [clj-time.core :as t])
+  (require [clj-time.format :as f])
+  (require [clj-time.predicates :as pr])
   )
+
+
+;; predicates
+
+(defn date-time?
+  "String to date time"
+  [s]
+  (try
+    (to-date-time s)
+    (catch Exception e nil)
+    )
+  )
+
+;; conversion from strings
 
 (defn to-date-time
   "String to date time"
   [s]
-  (t/date-time (Integer. (subs s 0 4)) (Integer. (subs s 4 6)) (Integer. (subs s 6 8)))
+  (f/parse (f/formatter "yyyyMMdd") s)
   )
 
 (defn duration-to-minutes
@@ -19,54 +35,93 @@
      )
   )
 
+;; Filename tests
 
-(defn to-date-duration-map
-  "Converts a string to a date duration map"
-  [s]
-  {:date (to-date-time (subs s 0 8))
-   :duration (duration-to-minutes (subs s 9))})
+(defn test-filename
+   "Check if the file has a name that matches a journal file pattern"
+   [predicate file]
+   (->> file
+        (.toPath)
+        (.getFileName)
+        (str)
+        (predicate)
+        )
+   )
 
-(defn to-date-duration-maps
-  "Converts a string to a date duration map"
-  [s]
+;; Get files
+
+(defn journal-files-in-dir
+  "Get all the journal files"
+  [dir]
+  (->> dir
+       (clojure.java.io/file)
+       (.listFiles)
+       (filter #(.isFile %))
+       (filter (partial test-filename date-time?))
+       )
+  )
+
+;; Total clocked minutes
+
+(defn total-clocked-minutes
+  "Total clocked time from string"
+  [content]
+  (let [[match duration] (re-find #"\*Total time\*.*\*(\d+:\d+)\*" content)]
+    (duration-to-minutes duration)
+    ))
+
+(defn total-clocked-minutes-file
+  "Get the total clocked time for the file"
+  [file]
+  {:file file
+   :minutes (try
+              (total-clocked-minutes (slurp file))
+              (catch Exception e
+                0))}
+  )
+
+(defn total-clocked-minutes-dir
+  "Calculate the total time clocked in from logbook in the journal files"
+  [dir]
   (->>
-   (split s #"\n")
-   (filter #(not= %1 ""))
-   (map (partial to-date-duration-map))
+   dir
+   (journal-files-in-dir)
+   (map total-clocked-minutes-file)
+   (map :minutes)
    (vec)
-   ))
-
-(defn total-time
-  "Calculate the total time for the date duration maps"
-  [collection]
-  (->>
-   (map :duration collection)
    (reduce +)
    )
   )
 
-;; (defn format-minutes
-;;   "Convert the minutes to a readable format"
-;;   [mins]
-;;   "test"
-;;   )
 
-;; (format-minutes "123")
-;; (total-time (to-date-duration-maps collection))
+;; Testing...
 
-;; (foo "test")
-;; (def collection "20170111:3:37
-;;   20170112:3:12
-;;   20170113:3:06
-;;   20170117:6:20
-;;   ")
-;; (def element "20170112:3:12")
+;; (journal-files-in-dir "/home/mandark/Documents/journal" )
+;; (total-clocked-minutes-dir "/home/mandark/Documents/journal" )
+
+
+;; Old tests
 
 ;; (->>
-;;  (split collection #"\n")
-;;  (filter #(not= %1 ""))
-;;  (map (partial to-date-duration-map))
-;;  (map :duration)
-;;  (reduce +)
+;;  "/home/mandark/Documents/journal"
+;;  (journal-files-in-dir)
+;;  (last)
+;;  (total-clocked-minutes-file)
 ;;  )
 
+;; Check the journal filenames
+
+;; (defn is-journal
+;;   "Check if string might be a journal file name"
+;;   [filename]
+;;   (to-date-time filename)
+;;   )
+
+;; (defn is-weekday
+;;   "Check if the file corresponds to a weekday"
+;;   [filename]
+;;   (->> filename
+;;        (to-date-time)
+;;        (pr/weekday?)
+;;        )
+;;   )
