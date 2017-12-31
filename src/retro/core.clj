@@ -71,16 +71,6 @@
     )
   )
 
-(defn weekday?
-  "Check if the file is for a weekday"
-  [file]
-  (->> file
-       (filename)
-       (to-date-time)
-       (pr/weekday?)
-       )
-  )
-
 ;; Filename tests
 
 (defn test-filename
@@ -96,14 +86,19 @@
 
 (defn journal-files-in-dir
   "Get all the journal files"
-  [dir]
+  [filter-fn dir]
   (->> dir
        (clojure.java.io/file)
        (.listFiles)
        (filter #(.isFile %))
        (filter (partial test-filename date-time?))
+       (filter filter-fn)
        )
   )
+
+(def dir "/home/mandark/Documents/journal")
+
+;; (journal-files-in-dir dir (comp not nil?))
 
 ;; Total clocked minutes
 ;;
@@ -119,12 +114,11 @@
    }
   )
 
-(defn find-in-dir
-  "Run the passed function for every journal file in the directory"
-  [find-fn dir]
+(defn find-in-files
+  "Run the passed function for every journal file passed"
+  [find-fn files]
   (->>
-   dir
-   (journal-files-in-dir)
+   files
    (map (partial find-in-file find-fn))
    )
   )
@@ -159,21 +153,21 @@
 ;; Clocked minutes
 ;; ---------------
 
-(defn total-clocked-minutes-dir
+(defn total-clocked-minutes-files
   "Find total clocked minutes per journal file found in the directory"
-  [dir]
+  [files]
   (->>
-   dir
-   (find-in-dir total-clocked-minutes)
+   files
+   (find-in-files total-clocked-minutes)
    )
   )
 
-(defn all-time-total-clocked-minutes-dir
-  "Sum the total clocked minutes for every journal file found in the directory"
-  [dir]
+(defn all-time-total-clocked-minutes-files
+  "Sum the total clocked minutes for file passed"
+  [files]
   (->>
-   dir
-   (total-clocked-minutes-dir)
+   files
+   (total-clocked-minutes-files)
    (filter (fn [x] ((comp not nil?) (:match x))))
    (map :match)
    (vec)
@@ -203,21 +197,11 @@
 ;; Check in time
 ;; -------------
 
-(defn checked-in-time-dir
-  "Find checked in time per journal file for weekdays found in the directory"
-  [dir]
-  (->>
-   dir
-   (find-in-dir check-in-time)
-   (filter (fn [x] (weekday? (:file x)))) ;; get the files and filter on that...
-   )
-  )
-
-(defn average-checked-in-time-dir
+(defn average-checked-in-time-files
   "Average checked in time for journal files relating to the weekdays in the directory"
-  [dir]
-  (->> dir
-       (checked-in-time-dir)
+  [files]
+  (->> files
+       (find-in-files check-in-time)
        (map :match)
        (vec)
        (filter (comp not nil?))
@@ -226,13 +210,6 @@
        (int)
        )
   )
-
-
-(def dir "/home/mandark/Documents/journal")
-
-(->> dir
-     (average-checked-in-time-dir)
-     )
 
 ;; (stats "/home/mandark/Documents/journal")
 
@@ -243,17 +220,56 @@
    :clocked-in-time {
                      :total (->>
                              dir
-                             (all-time-total-clocked-minutes-dir)
+                             (journal-files-in-dir (comp not nil?))
+                             (all-time-total-clocked-minutes-files)
                              (minutes-to-workdays))
+                     :workdays (->>
+                                dir
+                                (journal-files-in-dir (fn [file]
+                                                        (->> file
+                                                             (filename)
+                                                             (to-date-time)
+                                                             (pr/weekday?)
+                                                             )))
+                                (all-time-total-clocked-minutes-files)
+                                (minutes-to-workdays))
+                     :weekends (->>
+                          dir
+                          (journal-files-in-dir (fn [file]
+                                                  (->> file
+                                                       (filename)
+                                                       (to-date-time)
+                                                       (pr/weekend?)
+                                                       )))
+                          (all-time-total-clocked-minutes-files)
+                          (minutes-to-workdays))
                      }
    :check-in-time {
-                   :average (->>
-                             dir
-                             (average-checked-in-time-dir)
-                             (minutes-to-duration))
+                   :workdays (->>
+                              dir
+                              (journal-files-in-dir (fn [file]
+                                                      (->> file
+                                                           (filename)
+                                                           (to-date-time)
+                                                           (pr/weekday?)
+                                                           )))
+                              (average-checked-in-time-files)
+                              (minutes-to-duration))
+                   :weekends (->>
+                              dir
+                              (journal-files-in-dir (fn [file]
+                                                      (->> file
+                                                           (filename)
+                                                           (to-date-time)
+                                                           (pr/weekend?)
+                                                           )))
+                              (average-checked-in-time-files)
+                              (minutes-to-duration))
                    }
    }
   )
+
+(stats "/home/mandark/Documents/journal")
 
 
 ;; Total stats
@@ -262,24 +278,3 @@
 ;; voluntary and mandatory vacation I took : 22 + 3
 ;; My working days                         : 227
 (def working-days 227)
-
-(stats "/home/mandark/Documents/journal")
-
-
-
-;; Check the journal filenames
-
-;; (defn is-journal
-;;   "Check if string might be a journal file name"
-;;   [filename]
-;;   (to-date-time filename)
-;;   )
-
-;; (defn is-weekday
-;;   "Check if the file corresponds to a weekday"
-;;   [filename]
-;;   (->> filename
-;;        (to-date-time)
-;;        (pr/weekday?)
-;;        )
-;;   )
