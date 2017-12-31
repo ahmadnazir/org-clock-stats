@@ -17,6 +17,13 @@
          2603
          ))))
 
+(deftest test-check-in-time
+  (testing "Get the total clocked minutes from a journal file containing a log book"
+    (is (=
+         (check-in-time "** 09:23 retro")
+         563
+         ))))
+
 (deftest test-duration-to-minutes
   (testing "Convert a string representing a duration into minutes"
     (is (=
