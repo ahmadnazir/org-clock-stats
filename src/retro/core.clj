@@ -60,7 +60,10 @@
     )
   )
 
-;; predicates on strings
+;; predicates
+;; ----------
+
+;; on strings
 
 (defn date-time?
   "String to date time"
@@ -70,6 +73,20 @@
     (catch Exception e nil)
     )
   )
+
+;; on date time (should be in clj-time)
+
+(defn q1? [date-time]
+  (#{1 2 3} (t/month date-time)))
+
+(defn q2? [date-time]
+  (#{4 5 6} (t/month date-time)))
+
+(defn q3? [date-time]
+  (#{7 8 9} (t/month date-time)))
+
+(defn q4? [date-time]
+  (#{10 11 12} (t/month date-time)))
 
 ;; Filename tests
 
@@ -162,7 +179,7 @@
    )
   )
 
-(defn all-time-total-clocked-minutes-files
+(defn sum-total-clocked-minutes-files
   "Sum the total clocked minutes for file passed"
   [files]
   (->>
@@ -174,23 +191,19 @@
    (reduce +))
   )
 
-(defn monthly-total-clocked-minutes-dir
-  "Sum the total clocked minutes for every journal file found in the directory"
-  [dir]
+(defn sum-total-clocked-minutes-dir
+  "Sum the total clocked minutes for files present in directory"
+  [filter-fn dir]
   (->>
    dir
-   (total-clocked-minutes-dir)
-   ;; (reduce (fn [acc x]
-   ;;           (
-   ;;            assoc acc
-   ;;            (month (:file x)) x
-   ;;            )
-   ;;           ))
-   (map :match)
-   (vec)
-   (filter (comp not nil?))
-   (reduce +)
-   )
+   (journal-files-in-dir (fn [file]
+                           (->> file
+                                (filename)
+                                (to-date-time)
+                                (filter-fn)
+                                )))
+   (sum-total-clocked-minutes-files)
+   (minutes-to-workdays))
   )
 
 ;; -------------
@@ -211,6 +224,21 @@
        )
   )
 
+(defn average-checked-in-time-dir
+  "Average checked in time for journal files relating to the files in the directory"
+  [filter-fn dir]
+  (->>
+   dir
+   (journal-files-in-dir (fn [file]
+                           (->> file
+                                (filename)
+                                (to-date-time)
+                                (filter-fn)
+                                )))
+   (average-checked-in-time-files)
+   (minutes-to-duration))
+)
+
 ;; (stats "/home/mandark/Documents/journal")
 
 (defn stats
@@ -218,63 +246,56 @@
   [dir]
   {
    :clocked-in-time {
-                     :total (->>
-                             dir
-                             (journal-files-in-dir (comp not nil?))
-                             (all-time-total-clocked-minutes-files)
-                             (minutes-to-workdays))
-                     :workdays (->>
-                                dir
-                                (journal-files-in-dir (fn [file]
-                                                        (->> file
-                                                             (filename)
-                                                             (to-date-time)
-                                                             (pr/weekday?)
-                                                             )))
-                                (all-time-total-clocked-minutes-files)
-                                (minutes-to-workdays))
-                     :weekends (->>
-                          dir
-                          (journal-files-in-dir (fn [file]
-                                                  (->> file
-                                                       (filename)
-                                                       (to-date-time)
-                                                       (pr/weekend?)
-                                                       )))
-                          (all-time-total-clocked-minutes-files)
-                          (minutes-to-workdays))
+                     :total (sum-total-clocked-minutes-dir (comp not nil?) dir)
+                     :workdays {
+                                :year (sum-total-clocked-minutes-dir pr/weekday? dir)
+                                :q1 (sum-total-clocked-minutes-dir (every-pred pr/weekday? q1?) dir)
+                                :q2 (sum-total-clocked-minutes-dir (every-pred pr/weekday? q2?) dir)
+                                :q3 (sum-total-clocked-minutes-dir (every-pred pr/weekday? q3?) dir)
+                                :q4 (sum-total-clocked-minutes-dir (every-pred pr/weekday? q4?) dir)
+                                }
+                     :weekends {
+                                :year (sum-total-clocked-minutes-dir pr/weekend? dir)
+                                :q1 (sum-total-clocked-minutes-dir (every-pred pr/weekend? q1?) dir)
+                                :q2 (sum-total-clocked-minutes-dir (every-pred pr/weekend? q2?) dir)
+                                :q3 (sum-total-clocked-minutes-dir (every-pred pr/weekend? q3?) dir)
+                                :q4 (sum-total-clocked-minutes-dir (every-pred pr/weekend? q4?) dir)
+                                }
                      }
    :check-in-time {
-                   :workdays (->>
-                              dir
-                              (journal-files-in-dir (fn [file]
-                                                      (->> file
-                                                           (filename)
-                                                           (to-date-time)
-                                                           (pr/weekday?)
-                                                           )))
-                              (average-checked-in-time-files)
-                              (minutes-to-duration))
-                   :weekends (->>
-                              dir
-                              (journal-files-in-dir (fn [file]
-                                                      (->> file
-                                                           (filename)
-                                                           (to-date-time)
-                                                           (pr/weekend?)
-                                                           )))
-                              (average-checked-in-time-files)
-                              (minutes-to-duration))
+                   :workdays {
+                              :year (average-checked-in-time-dir pr/weekday? dir)
+                              :q1 (average-checked-in-time-dir (every-pred pr/weekday? q1?) dir)
+                              :q2 (average-checked-in-time-dir (every-pred pr/weekday? q2?) dir)
+                              :q3 (average-checked-in-time-dir (every-pred pr/weekday? q3?) dir)
+                              :q4 (average-checked-in-time-dir (every-pred pr/weekday? q4?) dir)
+                              }
+                   :weekends {
+                              :year (average-checked-in-time-dir pr/weekend? dir)
+                              :q1 (average-checked-in-time-dir (every-pred pr/weekend? q1?) dir)
+                              :q2 (average-checked-in-time-dir (every-pred pr/weekend? q2?) dir)
+                              :q3 (average-checked-in-time-dir (every-pred pr/weekend? q3?) dir)
+                              :q4 (average-checked-in-time-dir (every-pred pr/weekend? q4?) dir)
+                              }
                    }
    }
   )
 
-(stats "/home/mandark/Documents/journal")
+(def dir  "/home/mandark/Documents/journal")
+
+(clojure.pprint/pprint
+  (stats dir)
+  )
+
+(clojure.pprint/ )
+
+(spit "/tmp/stats.txt"
+      (stats dir)
+      )
 
 
-;; Total stats
-
+;; TODO: also use 'my' working days
+;;
 ;; Working days                            : 252
 ;; voluntary and mandatory vacation I took : 22 + 3
 ;; My working days                         : 227
-(def working-days 227)
