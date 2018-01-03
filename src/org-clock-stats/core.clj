@@ -382,17 +382,15 @@
    }
   )
 
-(def dir  "/home/mandark/Documents/journal")
-(def files (journal-files (comp not nil?) dir))
+;; Example usage:
+
+;; (def dir  "/home/mandark/Documents/journal")
+;; (def files (journal-files (comp not nil?) dir))
+
 ;; (stats predicates files)
 
-(clojure.pprint/pprint
- (stats predicates files)
- )
+;; (clojure.pprint/pprint
+;;  (stats predicates files)
+;;  )
 
 
-;; TODO: also use 'my' working days
-;;
-;; Working days                            : 252
-;; voluntary and mandatory vacation I took : 22 + 3
-;; My working days                         : 227

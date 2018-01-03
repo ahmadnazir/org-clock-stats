@@ -1,5 +1,6 @@
 (defproject org-clock-stats "0.1.0-SNAPSHOT"
   :description "Make sense of the data created when clocking in using org-mode"
+  :url "https://github.com/ahmadnazir/org-clock-stats"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [
