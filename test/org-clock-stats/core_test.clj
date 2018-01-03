@@ -1,6 +1,6 @@
-(ns retro.core-test
+(ns org-clock-stats.core-test
   (:require [clojure.test :refer :all]
-            [retro.core :refer :all]
+            [org-clock-stats.core :refer :all]
             [clj-time.core :as t]
             ))
 
@@ -22,6 +22,13 @@
     (is (=
          (check-in-time "** 09:23 retro")
          563
+         ))))
+
+(deftest test-find-support-time
+  (testing "Get the total clocked minutes from a journal file containing a log book"
+    (is (=
+         (find-support-time " | \\_  09:41 Support                         |        | 1:17 | ")
+         77
          ))))
 
 (deftest test-duration-to-minutes

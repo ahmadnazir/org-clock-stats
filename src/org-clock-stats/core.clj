@@ -1,4 +1,4 @@
-(ns retro.core
+(ns org-clock-stats.core
   (:use [clojure.string])
   (require [clj-time.core :as t])
   (require [clj-time.format :as f])
@@ -140,7 +140,7 @@
    :match (try
               (find-fn (slurp file))
               (catch Exception e
-                (print (str "Ignoring file: " file " since it doesn't contain the values. Error:" (.getMessage e)))))
+                (print (str "\nIgnoring file: " file " since it doesn't contain the values. Error:" (.getMessage e)))))
    }
   )
 
@@ -163,20 +163,19 @@
     (duration-to-minutes duration)
     ))
 
-(defn check-in-time
+(defn find-check-in-time
   "Total clocked time from string"
   [content]
   (let [[match duration] (re-find #"\*\* (\d+:\d+) " content)]
     (duration-to-minutes duration)
     ))
 
-
-;; find total clocked minutes
-
-(defn average
-  "Average for a vector of numbers"
-  [numbers]
-  (/ (reduce + numbers) (count numbers)))
+(defn find-support-time
+  "Total clocked time from string"
+  [content]
+  (let [[match start duration] (re-find #" ..  (\d+:\d+) [Ss]upport.*(\d+:\d+)" content)]
+    (duration-to-minutes duration)
+    ))
 
 
 ;; ---------------
@@ -184,20 +183,45 @@
 ;; ---------------
 
 (defn total-clocked-minutes
-  "Find total clocked minutes per journal file found in the directory"
+  "Find total clocked minutes per journal file"
   [files]
   (->>
    files
    (find-in-files find-total-clocked-minutes)
    )
   )
-
 (defn sum-total-clocked-minutes
-  "Sum the total clocked minutes for file passed"
+  "Sum the total clocked minutes for files passed"
   [files]
   (->>
    files
    (total-clocked-minutes)
+   (filter (fn [x] ((comp not nil?) (:match x))))
+   (map :match)
+   (vec)
+   (reduce +)
+   (minutes-to-workdays)
+   )
+  )
+
+;; ------------
+;; Support time
+;; ------------
+
+(defn support-time
+  "Find the duration spend on support per journal file"
+  [files]
+  (->>
+   files
+   (find-in-files find-support-time)
+   )
+  )
+(defn sum-support-time
+  "Sum the total clocked minutes for files passed"
+  [files]
+  (->>
+   files
+   (support-time)
    (filter (fn [x] ((comp not nil?) (:match x))))
    (map :match)
    (vec)
@@ -214,11 +238,11 @@
   "Average checked in time for journal files relating to the weekdays in the directory"
   [files]
   (->> files
-       (find-in-files check-in-time)
+       (find-in-files find-check-in-time)
        (map :match)
        (vec)
        (filter (comp not nil?))
-       (average)
+       ((fn [minutes] (/ (apply + minutes) (count minutes)))) ;; average
        (float)
        (int)
        (minutes-to-duration)
@@ -317,13 +341,55 @@
                                       (average-checked-in-time))
                              }
                    }
+
+   :support-time {
+                  :workday {
+                            :year (->> files
+                                       (filter (predicates :weekday))
+                                       (sum-support-time))
+                            :q1 (->> files
+                                     (filter (predicates :q1-weekday))
+                                     (sum-support-time))
+                            :q2 (->> files
+                                     (filter (predicates :q2-weekday))
+                                     (sum-support-time))
+                            :q3 (->> files
+                                     (filter (predicates :q3-weekday))
+                                     (sum-support-time))
+                            :q4 (->> files
+                                     (filter (predicates :q4-weekday))
+                                     (sum-support-time))
+                            }
+                  :weekend {
+                            :year (->> files
+                                       (filter (predicates :weekend))
+                                       (sum-support-time))
+                            :q1 (->> files
+                                     (filter (predicates :q1-weekend))
+                                     (sum-support-time))
+                            :q2 (->> files
+                                     (filter (predicates :q2-weekend))
+                                     (sum-support-time))
+                            :q3 (->> files
+                                     (filter (predicates :q3-weekend))
+                                     (sum-support-time))
+                            :q4 (->> files
+                                     (filter (predicates :q4-weekend))
+                                     (sum-support-time))
+                            }
+                   }
                      }
    }
   )
 
 (def dir  "/home/mandark/Documents/journal")
 (def files (journal-files (comp not nil?) dir))
-(stats predicates files)
+;; (stats predicates files)
+
+(clojure.pprint/pprint
+ (stats predicates files)
+ )
+
 
 ;; TODO: also use 'my' working days
 ;;

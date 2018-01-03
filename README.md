@@ -1,4 +1,4 @@
-# retro
+# org-clock-stats
 
 This project helps me make sense of the data that gets recorded when I use org-mode to clock-in for tasks.
 
