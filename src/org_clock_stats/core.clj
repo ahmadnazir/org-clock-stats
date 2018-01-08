@@ -3,6 +3,7 @@
   (require [clj-time.core :as t])
   (require [clj-time.format :as f])
   (require [clj-time.predicates :as pr])
+  (require [clj-time.periodic :as p])
   )
 
 
@@ -193,16 +194,15 @@
 (defn sum-total-clocked-minutes
   "Sum the total clocked minutes for files passed"
   [files]
-  (->>
-   files
-   (total-clocked-minutes)
-   (filter (fn [x] ((comp not nil?) (:match x))))
-   (map :match)
-   (vec)
-   (reduce +)
-   (minutes-to-workdays)
-   )
-  )
+  (minutes-to-workdays
+   (if (empty? files) 0
+       (->>
+        files
+        (total-clocked-minutes)
+        (filter (fn [x] ((comp not nil?) (:match x))))
+        (map :match)
+        (vec)
+        (reduce +)))))
 
 ;; ------------
 ;; Support time
@@ -219,16 +219,15 @@
 (defn sum-support-time
   "Sum the total clocked minutes for files passed"
   [files]
-  (->>
-   files
-   (support-time)
-   (filter (fn [x] ((comp not nil?) (:match x))))
-   (map :match)
-   (vec)
-   (reduce +)
-   (minutes-to-workdays)
-   )
-  )
+  (minutes-to-workdays
+   (if (empty? files) 0
+       (->>
+        files
+        (support-time)
+        (filter (fn [x] ((comp not nil?) (:match x))))
+        (map :match)
+        (vec)
+        (reduce +)))))
 
 ;; -------------
 ;; Check in time
@@ -237,59 +236,97 @@
 (defn average-checked-in-time
   "Average checked in time for journal files relating to the weekdays in the directory"
   [files]
-  (->> files
-       (find-in-files find-check-in-time)
-       (map :match)
-       (vec)
-       (filter (comp not nil?))
-       ((fn [minutes] (/ (apply + minutes) (count minutes)))) ;; average
-       (float)
-       (int)
-       (minutes-to-duration)
-       )
+  (minutes-to-duration
+   (if (empty? files) 0
+       (->> files
+            (find-in-files find-check-in-time)
+            (map :match)
+            (vec)
+            (filter (comp not nil?))
+            ;; average
+            ((fn [minutes]
+               (if (= minutes 0)
+                 0
+                 (/ (apply + minutes) (count minutes)))))
+            (float)
+            (int)))))
+
+(defn off-days
+  "Get all the vacation days as a set"
+  [vacation]
+  (clojure.set/union
+   (->> vacation
+        (:single)
+        (map (comp to-date-time name))
+        (set))
+   (->> vacation
+        (:range)
+        (map (fn [x]
+               (let [start (to-date-time (name (:start x)))
+                     end (to-date-time (name (:end x)))
+                     days (clojure.set/union (p/periodic-seq start end (t/days 1)))]
+                 (set
+                  (conj days end)))))
+        (apply clojure.set/union))))
+
+(defn off-day?
+  "Check if the given date time is a non-working days using the vacation days and public holidays"
+  [vacation-days public-holidays s]
+  (boolean
+   (or
+    (vacation-days s)
+    (public-holidays s)
+    )
+   )
   )
 
-(def predicates {
-            :weekday    (partial journal-file-predicate pr/weekday?)
-            :q1-weekday (partial journal-file-predicate (every-pred pr/weekday? q1?))
-            :q2-weekday (partial journal-file-predicate (every-pred pr/weekday? q2?))
-            :q3-weekday (partial journal-file-predicate (every-pred pr/weekday? q3?))
-            :q4-weekday (partial journal-file-predicate (every-pred pr/weekday? q4?))
-            :weekend    (partial journal-file-predicate pr/weekend?)
-            :q1-weekend (partial journal-file-predicate (every-pred pr/weekend? q1?))
-            :q2-weekend (partial journal-file-predicate (every-pred pr/weekend? q2?))
-            :q3-weekend (partial journal-file-predicate (every-pred pr/weekend? q3?))
-            :q4-weekend (partial journal-file-predicate (every-pred pr/weekend? q4?))
-            }
+(->> files
+     (filter (predicates :q1-workday)))
+
+(def predicates
+  {
+   :workday    (partial journal-file-predicate (every-pred pr/weekday? (comp not (partial off-day? *vacation-days* *public-holidays*))))
+   :q1-workday (partial journal-file-predicate (every-pred pr/weekday? q1? (comp not (partial off-day? *vacation-days* *public-holidays*))))
+   :q2-workday (partial journal-file-predicate (every-pred pr/weekday? q2? (comp not (partial off-day? *vacation-days* *public-holidays*))))
+   :q3-workday (partial journal-file-predicate (every-pred pr/weekday? q3? (comp not (partial off-day? *vacation-days* *public-holidays*))))
+   :q4-workday (partial journal-file-predicate (every-pred pr/weekday? q4? (comp not (partial off-day? *vacation-days* *public-holidays*))))
+
+   :weekday    (partial journal-file-predicate pr/weekday?)
+   :q1-weekday (partial journal-file-predicate (every-pred pr/weekday? q1?))
+   :q2-weekday (partial journal-file-predicate (every-pred pr/weekday? q2?))
+   :q3-weekday (partial journal-file-predicate (every-pred pr/weekday? q3?))
+   :q4-weekday (partial journal-file-predicate (every-pred pr/weekday? q4?))
+
+   :weekend    (partial journal-file-predicate pr/weekend?)
+   :q1-weekend (partial journal-file-predicate (every-pred pr/weekend? q1?))
+   :q2-weekend (partial journal-file-predicate (every-pred pr/weekend? q2?))
+   :q3-weekend (partial journal-file-predicate (every-pred pr/weekend? q3?))
+   :q4-weekend (partial journal-file-predicate (every-pred pr/weekend? q4?))
+   }
   )
 
 (defn stats
   "Get all the stats"
   [predicates files]
-  {
-   :clocked-in-time {
-                     :total (->> files
+  {:clocked-in-time {:total (->> files
                                  (filter (comp not nil?))
                                  (sum-total-clocked-minutes))
-                     :workday {
-                               :year (->> files
-                                          (filter (predicates :weekday))
+                     :workday {:year (->> files
+                                          (filter (predicates :workday))
                                           (sum-total-clocked-minutes))
                                :q1 (->> files
-                                        (filter (predicates :q1-weekday))
+                                        (filter (predicates :q1-workday))
                                         (sum-total-clocked-minutes))
                                :q2 (->> files
-                                        (filter (predicates :q2-weekday))
+                                        (filter (predicates :q2-workday))
                                         (sum-total-clocked-minutes))
                                :q3 (->> files
-                                        (filter (predicates :q3-weekday))
+                                        (filter (predicates :q3-workday))
                                         (sum-total-clocked-minutes))
                                :q4 (->> files
-                                        (filter (predicates :q4-weekday))
-                                        (sum-total-clocked-minutes))
-                               }
-                     :weekend {
-                               :year (->> files
+                                        (filter (predicates :q4-workday))
+                                        (sum-total-clocked-minutes))}
+                     :weekend {:year (->> files
                                           (filter (predicates :weekend))
                                           (sum-total-clocked-minutes))
                                :q1 (->> files
@@ -303,11 +340,8 @@
                                         (sum-total-clocked-minutes))
                                :q4 (->> files
                                         (filter (predicates :q4-weekend))
-                                        (sum-total-clocked-minutes))
-                               }
-   :check-in-time {
-                   :workday {
-                             :year (->> files
+                                        (sum-total-clocked-minutes))}}
+   :check-in-time {:workday {:year (->> files
                                         (filter (predicates :weekday))
                                         (average-checked-in-time))
                              :q1 (->> files
@@ -321,10 +355,8 @@
                                       (average-checked-in-time))
                              :q4 (->> files
                                       (filter (predicates :q4-weekday))
-                                      (average-checked-in-time))
-                             }
-                   :weekend {
-                             :year (->> files
+                                      (average-checked-in-time))}
+                   :weekend {:year (->> files
                                         (filter (predicates :weekend))
                                         (average-checked-in-time))
                              :q1 (->> files
@@ -338,13 +370,8 @@
                                       (average-checked-in-time))
                              :q4 (->> files
                                       (filter (predicates :q4-weekend))
-                                      (average-checked-in-time))
-                             }
-                   }
-
-   :support-time {
-                  :workday {
-                            :year (->> files
+                                      (average-checked-in-time))}}
+   :support-time {:workday {:year (->> files
                                        (filter (predicates :weekday))
                                        (sum-support-time))
                             :q1 (->> files
@@ -358,10 +385,8 @@
                                      (sum-support-time))
                             :q4 (->> files
                                      (filter (predicates :q4-weekday))
-                                     (sum-support-time))
-                            }
-                  :weekend {
-                            :year (->> files
+                                     (sum-support-time))}
+                  :weekend {:year (->> files
                                        (filter (predicates :weekend))
                                        (sum-support-time))
                             :q1 (->> files
@@ -375,22 +400,45 @@
                                      (sum-support-time))
                             :q4 (->> files
                                      (filter (predicates :q4-weekend))
-                                     (sum-support-time))
-                            }
-                   }
-                     }
-   }
-  )
+                                     (sum-support-time))}}})
+
 
 ;; Example usage:
 
-;; (def dir  "/home/mandark/Documents/journal")
-;; (def files (journal-files (comp not nil?) dir))
+(def vacation {
+               :half   #{ :20170620 :20171019 }
+               :single #{ :20170113 :20170120 :20170505 }
+               :range  #{
+                         { :start :20170620 :end :20170706 } ;; Pakistan
+                         { :start :20171019 :end :20171022 } ;; Barcelona
+                         { :start :20171227 :end :20171229 } ;; Mandatory vacation Penneo
+                         }
+               })
 
-;; (stats predicates files)
+(def public-holidays {
+                      :single #{
+                                :20170101 ;; New year
+                                :20170512 ;; Prayer day (4th Friday after Easter)
+                                :20170525 ;; Ascension day (40 days after Easter)
+                                :20170605 ;; Whit Monday (7th Monday after Easter)
+                                }
+                      :range  #{
+                                { :start :20170413 :end :20170417 } ;; Easter
+                                { :start :20171224 :end :20171226 } ;; Christmas
+                                }
+                      })
+
+
+
+;; TODO: memoize
+(def *public-holidays* (off-days public-holidays))
+(def *vacation-days* (off-days vacation))
+
+(def *dir*  "/home/mandark/Documents/journal/2017")
+(def *files* (journal-files (comp not nil?) *dir*))
+
+(stats predicates *files*)
 
 ;; (clojure.pprint/pprint
-;;  (stats predicates files)
+;;  (stats predicates *files*)
 ;;  )
-
-
