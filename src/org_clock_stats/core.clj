@@ -1,104 +1,15 @@
 (ns org-clock-stats.core
   (:use [clojure.string])
-  (require [clj-time.core :as t])
-  (require [clj-time.format :as f])
-  (require [clj-time.predicates :as pr])
   (require [clj-time.periodic :as p])
+  (require [org-clock-stats.predicate :as pred])
+  (require [clj-time.predicates :as tp])
   )
-
-
-;; conversion from strings
-
-(defn to-date-time
-  "String to date time"
-  [s]
-  (f/parse (f/formatter "yyyyMMdd") s)
-  )
-
-(defn duration-to-minutes
-  "String in the format hh:mm to minutes conversion"
-  [s]
-  (let [duration (split s #":")
-        hours (Integer. (first duration))
-        minutes (Integer. (second duration))]
-    (+ (* hours 60) minutes)
-    )
-  )
-
-(defn minutes-to-duration
-  "Minutes to a string representing the duration"
-  [minutes]
-  (let [h (int (/ minutes 60))
-        m (mod minutes 60)
-        days (if (> h 23) (int (/ h 24)))
-        ]
-    (if days (str days " day" (if (> days 1) "s") ", " (str (mod h 24) ":" m))
-        (format "%02d:%02d" h m))
-    )
-  )
-
-(defn minutes-to-workdays
-  "Minutes to a string representing the work days"
-  [minutes]
-  (let [h (int (/ minutes 60))
-        m (mod minutes 60)
-        workdays (if (> h 6) (int (/ h 6)))
-        ]
-    (if workdays (str workdays " workday" (if (> workdays 1) "s") ", " (format "%02d:%02d" (mod h 6) m))
-        (format "%02d:%02d" h m)
-        )
-    )
-  )
-
-;; predicates
-;; ----------
-
-;; on strings
-
-(defn date-time?
-  "String to date time"
-  [s]
-  (try
-    (to-date-time s)
-    (catch Exception e nil)
-    )
-  )
-
-;; on journal files
-
-(defn journal-file-predicate
-  "Check if the file belongs to a date time that satisfies the predicate"
-  [predicate file]
-  (->> file
-       (.toPath)
-       (.getFileName)
-       (str)
-       (to-date-time)
-       (predicate)
-       )
-  )
-
-;; on date time (should be in clj-time)
-
-(defn q1? [date-time]
-  (#{1 2 3} (t/month date-time)))
-
-(defn q2? [date-time]
-  (#{4 5 6} (t/month date-time)))
-
-(defn q3? [date-time]
-  (#{7 8 9} (t/month date-time)))
-
-(defn q4? [date-time]
-  (#{10 11 12} (t/month date-time)))
-
-;; Filename tests
-
 
 ;; Get files
 ;;
 ;; TODO refactor the following so that 3 separate functions aren't needed
 
+;; filename :: File -> string
 (defn filename
   "Get the file name for a file"
   [file]
@@ -118,328 +29,208 @@
   )
 (defn journal-files
   "Get all the journal files"
-  [filter-fn dir]
+  [dir]
   (->> dir
        (clojure.java.io/file)
        (.listFiles)
        (filter #(.isFile %))
-       (filter (partial test-filename date-time?))
-       (filter filter-fn)
+       (filter (partial test-filename pred/date-time?))
        )
   )
 
-(def dir "/home/mandark/Documents/journal")
+;; @todo: refactor the following two
+;;        everything is the same except for the .* in the regexp
+(defn -find-work-time-starting-with
+  "Clocked time from string"
+  ([title]
+   (partial -find-work-time-starting-with title))
+  ([title content]
+   (let [[match start duration] (re-find (re-pattern (str "(?i)..  (\\d+:\\d+) " title ".*(\\d+:\\d+)")) content)]
+     (duration-to-minutes duration)
+     )))
+(defn -find-work-time-containing
+  "Clocked time from string"
+  ([title]
+   (partial -find-work-time-containing title))
+  ([title content]
+   (let [[match start duration] (re-find (re-pattern (str "(?i)..  (\\d+:\\d+) .*" title ".*(\\d+:\\d+)")) content)]
+     (duration-to-minutes duration)
+     )))
 
-;; (journal-files dir (comp not nil?))
-
-;; Total clocked minutes
-;;
-;; TODO The following two functions can be refactored to use multimethods
-(defn find-in-file
-  "Get the total clocked time for the file"
-  ([find-fn]
-   (partial find-in-file find-fn))
-  ([find-fn file]
-   {:file file
-    :match (try
-             (find-fn (slurp file))
-             (catch Exception e
-               (print "")
-               ;; (print (str "\nIgnoring file: " file " since it doesn't contain the values. Error:" (.getMessage e)))
-               ))
-    })
+;; find-work-time :: name -> title -> content -> minutes
+(defn find-work-time
+  "Find work time using a specific search function and title in the given content"
+  ([search-fn-name]
+   (partial find-work-time search-fn-name))
+  ([search-fn-name title]
+   (partial find-work-time search-fn-name title))
+  ([search-fn-name title content]
+   (case search-fn-name
+     :title-starts-with (-find-work-time-starting-with title content)
+     :title-contains    (-find-work-time-containing title content)
+     (throw (Exception. (str  "Search fn-name: " search-fn-name " not recognized")))))
   )
 
-(defn find-in-files
-  "Run the passed function for every journal file passed"
-  ([find-fn]
-   (partial find-in-files find-fn))
-  ([find-fn files]
-   (->>
-    files
-    (map (partial find-in-file find-fn))
-    ))
-  )
-
-;; Find functions
-;; These functions go through the content and find specific information
-
-(defn find-total-clocked-minutes
+;; find-work-time :: content -> minutes
+(defn find-total-time
   "Total clocked time from string"
   [content]
   (let [[match duration] (re-find #"\*Total time\*.*\*(\d+:\d+)\*" content)]
     (duration-to-minutes duration)
     ))
 
-(defn find-check-in-time
-  "Total clocked time from string"
-  [content]
-  (let [[match duration] (re-find #"\*\* (\d+:\d+) " content)]
-    (duration-to-minutes duration)
-    ))
 
-(defn find-support-time
-  "Total clocked time from string"
-  [content]
-  (let [[match start duration] (re-find #" ..  (\d+:\d+) [Ss]upport.*(\d+:\d+)" content)]
-    (duration-to-minutes duration)
-    ))
+;; apply-fn-file :: (name -> title -> content -> hours) -> File -> hours
+;;
+;; What if instead of the above, we convert the function so that it takes a File instead of content like the following:
+;;
+;; > apply-fn-file :: (name -> title -> content -> hours) -> (name -> title -> File -> hours)
+;;
+(defn apply-fn-file
+  "Get the total clocked time for the file"
+  ([find-fn]
+   (partial apply-fn-file find-fn))
+  ([find-fn file]
+   {:file file
+    :value (try
+             (find-fn (slurp file))
+             (catch Exception e
+               (print (str
+                       ""
+                       ;; "\n"
+                       ;; "Nothing found: " file ". "
+                       ;; "Error:" (.getMessage e)
+                       ))))
+    }))
+
+;; SUM functions
+;;
+;; The following sum the times for different criterion
+
+;; sum-work-time :: type -> [title] -> [File] -> hours
+(defn sum-work-time
+  "Sum all work time (in hours) for specified work titles in files"
+  ([search-fn-name titles]
+   (partial sum-work-time search-fn-name titles))
+  ([search-fn-name titles files]
+   (->> files
+
+        ;; SCENARIO 1 : Call 'f' number of functions
+        ;;
+        ;; - make find functions for every titls
+        ;; - collapse them (juxt) into one big function
+        ;; - call that one big function for every file
+        ;; - the one big function is like calling every smaller function on the
+        ;;   inputs. if any of the smaller function throws an exception, the
+        ;;   whole thing returns nil because the exception is caught on the
+        ;;   outside, and the whole computation returns a nil
+
+        ;; (map (apply-fn-file
+        ;;       (apply juxt (map (find-work-time :title-starts-with) titles))))
+
+        ;; SCENARIO 2 : Call 't*f' number of functions
+        ;;
+        ;; - for every title, create a function that takes a title and a file
+        ;;   i.e. the total number of functions called in the outer computation
+        ;;   are t*f. If something fails, it does't effect the other functions
+
+        (map (apply
+              juxt
+              (map
+               (comp apply-fn-file (find-work-time search-fn-name))
+               titles)))
+        (flatten)
+
+        (map :value)
+        (filter (comp not nil?))
+        (flatten)
+        (reduce +)
+        )))
 
 
-;; ---------------
-;; Clocked minutes
-;; ---------------
-
-(defn total-clocked-minutes
-  "Find total clocked minutes per journal file"
+(defn sum-total-time
+  "Sum total time"
   [files]
-  (->>
-   files
-   (find-in-files find-total-clocked-minutes)
-   )
-  )
-(defn sum-total-clocked-minutes
-  "Sum the total clocked minutes for files passed"
-  [files]
-  (minutes-to-workdays
-   (if (empty? files) 0
-       (->>
-        files
-        (total-clocked-minutes)
-        (filter (fn [x] ((comp not nil?) (:match x))))
-        (map :match)
-        (vec)
-        (reduce +)))))
+  (->> files
+       (map (apply-fn-file find-total-time))
+       (map :value)
 
-;; ------------
-;; Support time
-;; ------------
+       (filter (comp not nil?))
+       (reduce +)
+       ))
 
-(defn support-time
-  "Find the duration spend on support per journal file"
-  [files]
-  (->>
-   files
-   (find-in-files find-support-time)
-   )
-  )
-(defn sum-support-time
-  "Sum the total clocked minutes for files passed"
-  [files]
-  (minutes-to-workdays
-   (if (empty? files) 0
-       (->>
-        files
-        (support-time)
-        (filter (fn [x] ((comp not nil?) (:match x))))
-        (map :match)
-        (vec)
-        (reduce +)))))
 
-;; -------------
-;; Check in time
-;; -------------
+;; STATS
 
-(defn average-checked-in-time
-  "Average checked in time for journal files relating to the weekdays in the directory"
-  [files]
-  (minutes-to-duration
-   (if (empty? files) 0
-       (->> files
-            (find-in-files find-check-in-time)
-            (map :match)
-            (vec)
-            (filter (comp not nil?))
-            ;; average
-            ((fn [minutes]
-               (if (= minutes 0)
-                 0
-                 (/ (apply + minutes) (count minutes)))))
-            (float)
-            (int)))))
-
-(defn off-days
-  "Get all the vacation days as a set"
-  [vacation]
-  (clojure.set/union
-   (->> vacation
-        (:single)
-        (map (comp to-date-time name))
-        (set))
-   (->> vacation
-        (:range)
-        (map (fn [x]
-               (let [start (to-date-time (name (:start x)))
-                     end (to-date-time (name (:end x)))
-                     days (clojure.set/union (p/periodic-seq start end (t/days 1)))]
-                 (set
-                  (conj days end)))))
-        (apply clojure.set/union))))
-
-(defn off-day?
-  "Check if the given date time is a non-working days using the vacation days and public holidays"
-  [vacation-days public-holidays s]
-  (boolean
-   (or
-    (vacation-days s)
-    (public-holidays s)
-    )
-   )
-  )
-
-;; (->> files
-;;      (filter (predicates :q1-workday)))
+(def preds [:total (comp not nil?)
+            ;; :q1 (partial pred/journal-file? q1?)
+            ;; :q2 (partial pred/journal-file? q2?)
+            ;; :q3 (partial pred/journal-file? q3?)
+            ;; :q4 (partial pred/journal-file? q4?)
+            :january   (partial pred/journal-file? tp/january?  )
+            :february  (partial pred/journal-file? tp/february? )
+            :march     (partial pred/journal-file? tp/march?    )
+            :april     (partial pred/journal-file? tp/april?    )
+            :may       (partial pred/journal-file? tp/may?      )
+            :june      (partial pred/journal-file? tp/june?     )
+            :july      (partial pred/journal-file? tp/july?     )
+            :august    (partial pred/journal-file? tp/august?   )
+            :september (partial pred/journal-file? tp/september?)
+            :october   (partial pred/journal-file? tp/october?  )
+            :november  (partial pred/journal-file? tp/november? )
+            :december  (partial pred/journal-file? tp/december? )])
 
 (defn stats
   "Get all the stats"
-  [predicates files]
-  {:clocked-in-time {:total (->> files
-                                 (filter (comp not nil?))
-                                 (sum-total-clocked-minutes))
-                     :work {:year (->> files
-                                     (filter (predicates :workday))
-                                     (sum-total-clocked-minutes))
-                          :q1 (->> files
-                                   (filter (predicates :q1-workday))
-                                   (sum-total-clocked-minutes))
-                          :q2 (->> files
-                                   (filter (predicates :q2-workday))
-                                   (sum-total-clocked-minutes))
-                          :q3 (->> files
-                                   (filter (predicates :q3-workday))
-                                   (sum-total-clocked-minutes))
-                          :q4 (->> files
-                                   (filter (predicates :q4-workday))
-                                   (sum-total-clocked-minutes))}
-                     :off {:year (->> files
-                                      (filter (predicates :offday))
-                                      (sum-total-clocked-minutes))
-                           :q1 (->> files
-                                    (filter (predicates :q1-offday))
-                                    (sum-total-clocked-minutes))
-                           :q2 (->> files
-                                    (filter (predicates :q2-offday))
-                                    (sum-total-clocked-minutes))
-                           :q3 (->> files
-                                    (filter (predicates :q3-offday))
-                                    (sum-total-clocked-minutes))
-                           :q4 (->> files
-                                    (filter (predicates :q4-offday))
-                                    (sum-total-clocked-minutes))}}
-   :check-in-time {:work {:year (->> files
-                                   (filter (predicates :workday))
-                                   (average-checked-in-time))
-                        :q1 (->> files
-                                 (filter (predicates :q1-workday))
-                                 (average-checked-in-time))
-                        :q2 (->> files
-                                 (filter (predicates :q2-workday))
-                                 (average-checked-in-time))
-                        :q3 (->> files
-                                 (filter (predicates :q3-workday))
-                                 (average-checked-in-time))
-                        :q4 (->> files
-                                 (filter (predicates :q4-workday))
-                                 (average-checked-in-time))}
-                   :off {:year (->> files
-                                    (filter (predicates :offday))
-                                    (average-checked-in-time))
-                         :q1 (->> files
-                                  (filter (predicates :q1-offday))
-                                  (average-checked-in-time))
-                         :q2 (->> files
-                                  (filter (predicates :q2-offday))
-                                  (average-checked-in-time))
-                         :q3 (->> files
-                                  (filter (predicates :q3-offday))
-                                  (average-checked-in-time))
-                         :q4 (->> files
-                                  (filter (predicates :q4-offday))
-                                  (average-checked-in-time))}}
-   :support-time {:work {:year (->> files
-                                  (filter (predicates :workday))
-                                  (sum-support-time))
-                       :q1 (->> files
-                                (filter (predicates :q1-workday))
-                                (sum-support-time))
-                       :q2 (->> files
-                                (filter (predicates :q2-workday))
-                                (sum-support-time))
-                       :q3 (->> files
-                                (filter (predicates :q3-workday))
-                                (sum-support-time))
-                       :q4 (->> files
-                                (filter (predicates :q4-workday))
-                                (sum-support-time))}
-                  :off {:year (->> files
-                                   (filter (predicates :offday))
-                                   (sum-support-time))
-                        :q1 (->> files
-                                 (filter (predicates :q1-offday))
-                                 (sum-support-time))
-                        :q2 (->> files
-                                 (filter (predicates :q2-offday))
-                                 (sum-support-time))
-                        :q3 (->> files
-                                 (filter (predicates :q3-offday))
-                                 (sum-support-time))
-                        :q4 (->> files (filter (predicates :q4-offday))
-                                 (sum-support-time))}}})
+  [preds files]
+  (let [
+        build-stats (fn [preds search-fn files]
+                      (zipmap
+                       (vec
+                        (take-nth 2 preds))
+                       (vec
+                        (map (fn [x] (->> files (filter x) search-fn)) (take-nth 2 (rest preds))))))
 
+        support-time (sum-work-time :title-starts-with ["support"])
+        personal-time (sum-work-time :title-contains ["blog" "exsqlaim" "prodigy" "aww.yeah" "pine" "emacs"]) ;; night scout?
+        ]
+    {
+     :clocked-in-time (build-stats preds sum-total-time files)
+     :support-time (build-stats preds support-time files)
+     :personal-time (build-stats preds personal-time files)
+     }))
 
-;; Example usage:
+(def *files* (journal-files "/home/mandark/Documents/journal/2017"))
 
-(def vacation {
-               :half   #{ :20170620 :20171019 }
-               :single #{ :20170113 :20170120 :20170505 }
-               :range  #{
-                         { :start :20170620 :end :20170706 } ;; Pakistan
-                         { :start :20171019 :end :20171022 } ;; Barcelona
-                         { :start :20171227 :end :20171229 } ;; Mandatory vacation Penneo
-                         }
-               })
+;; (clojure.pprint/pprint
+;;  (stats preds *files*)
+;;  )
 
-(def public-holidays {
-                      :single #{
-                                :20170101 ;; New year
-                                :20170512 ;; Prayer day (4th Friday after Easter)
-                                :20170525 ;; Ascension day (40 days after Easter)
-                                :20170605 ;; Whit Monday (7th Monday after Easter)
-                                }
-                      :range  #{
-                                { :start :20170413 :end :20170417 } ;; Easter
-                                { :start :20171224 :end :20171226 } ;; Christmas
-                                }
-                      })
+(def s (stats preds *files*))
 
-;; TODO: memoize
-(def *public-holidays* (off-days public-holidays))
-(def *vacation-days* (off-days vacation))
+;; Create a csv that can be exported
+;; NOTE: This is a temporary solution until I start working on the UI using
+;;       Clojure Script
 
-
-(def predicates
-  {
-   :workday    (partial journal-file-predicate (every-pred pr/weekday? (comp not (partial off-day? *vacation-days* *public-holidays*))))
-   :q1-workday (partial journal-file-predicate (every-pred pr/weekday? (comp not (partial off-day? *vacation-days* *public-holidays*)) q1?))
-   :q2-workday (partial journal-file-predicate (every-pred pr/weekday? (comp not (partial off-day? *vacation-days* *public-holidays*)) q2?))
-   :q3-workday (partial journal-file-predicate (every-pred pr/weekday? (comp not (partial off-day? *vacation-days* *public-holidays*)) q3?))
-   :q4-workday (partial journal-file-predicate (every-pred pr/weekday? (comp not (partial off-day? *vacation-days* *public-holidays*)) q4?))
-
-   :offday    (partial journal-file-predicate (some-fn (partial off-day? *vacation-days* *public-holidays*) pr/weekend?))
-   :q1-offday (partial journal-file-predicate (some-fn (partial off-day? *vacation-days* *public-holidays*) (every-pred pr/weekend? q1?)))
-   :q2-offday (partial journal-file-predicate (some-fn (partial off-day? *vacation-days* *public-holidays*) (every-pred pr/weekend? q2?)))
-   :q3-offday (partial journal-file-predicate (some-fn (partial off-day? *vacation-days* *public-holidays*) (every-pred pr/weekend? q3?)))
-   :q4-offday (partial journal-file-predicate (some-fn (partial off-day? *vacation-days* *public-holidays*) (every-pred pr/weekend? q4?)))
-   }
-  )
-
-
-(def *dir*  "/home/mandark/Documents/journal/2017")
-(def *files* (journal-files (comp not nil?) *dir*))
-
-
-(clojure.pprint/pprint
- (stats predicates *files*)
+(print
+ (let [pred-keys         (take-nth 2 preds)
+       pred-names        (map name pred-keys)
+       q                 (map (apply juxt pred-keys)
+                              [(:clocked-in-time s)
+                               (:support-time s)
+                               (:personal-time s)])
+       q'                (map vector (first q) (second q) (last q))
+       q''               (map (fn [[total support personal]]
+                                [(- total (+ support personal))
+                                 support personal])
+                              q')
+       csv-rows          (loop [rows q'' acc []]
+                           (if (empty? rows)
+                             acc
+                             (recur (rest rows)
+                                    (conj acc (join ","  (first rows))))))
+       labelled-csv-rows (map str (map (fn [name] (str (capitalize name) ",")) pred-names) csv-rows)
+       csv               (join "\n" labelled-csv-rows)]
+   csv
+   )
  )
-
-
