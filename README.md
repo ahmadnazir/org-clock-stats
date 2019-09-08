@@ -25,14 +25,3 @@ Copyright © 2019 Ahmad Nazir Raja
 
 Distributed under the Eclipse Public License either version 1.0 or (at
 your option) any later version.
-
-
-## FAQ
-
-### Get all tags
-
-In the journal directory:
-
-```bash
-ls -ltra | c 9 | grep -e "[0-9]$" | xargs cat | grep '| \\_  ' | awk -F '|' '{print tolower($2)}' | c 2 : | sed -E s/'[0-9]{2} '//g | sed -E s/' +$'//g | sort | uniq -c | sort -n
-```
