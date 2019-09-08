@@ -164,10 +164,12 @@
 ;; STATS
 
 (def preds [:total (comp not nil?)
-            ;; :q1 (partial pred/journal-file? q1?)
-            ;; :q2 (partial pred/journal-file? q2?)
-            ;; :q3 (partial pred/journal-file? q3?)
-            ;; :q4 (partial pred/journal-file? q4?)
+
+            ;; :q1 (partial pred/journal-file? pred/q1?)
+            ;; :q2 (partial pred/journal-file? pred/q2?)
+            ;; :q3 (partial pred/journal-file? pred/q3?)
+            ;; :q4 (partial pred/journal-file? pred/q4?)
+
             :january   (partial pred/journal-file? tp/january?  )
             :february  (partial pred/journal-file? tp/february? )
             :march     (partial pred/journal-file? tp/march?    )
@@ -179,7 +181,10 @@
             :september (partial pred/journal-file? tp/september?)
             :october   (partial pred/journal-file? tp/october?  )
             :november  (partial pred/journal-file? tp/november? )
-            :december  (partial pred/journal-file? tp/december? )])
+            :december  (partial pred/journal-file? tp/december? )
+
+
+            ])
 
 (defn stats
   "Get all the stats"
